@@ -83,7 +83,7 @@ if ! unzip -l "$ZIP" | grep -q ' plugin\.json$'; then
   unzip -l "$ZIP" >&2
   exit 1
 fi
-echo "    $(unzip -l "$ZIP" | tail -1 | awk '{print $2}') bytes, files at root"
+echo "    $(unzip -l "$ZIP" | tail -1 | awk '{print $2" bytes, "$3" files"}'), plugin.json at root"
 
 # 4. release --------------------------------------------------------------
 echo "==> creating release v$VERSION"
