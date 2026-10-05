@@ -36,6 +36,13 @@ bentomux --plugin-validate petdex.pets
 
 Exit `0` is ok, `1` means errors were found, `2` is a usage error.
 
+It takes a folder **or** a built `.zip`, so the exact bytes you are about to
+upload can be checked before they go anywhere:
+
+```bash
+bentomux --plugin-validate .build/petdex.pets-1.6.0.zip --json
+```
+
 Install it into the app during development:
 
 ```bash
