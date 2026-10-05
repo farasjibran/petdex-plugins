@@ -1,0 +1,13 @@
+# Release zips are build output, not source. publish.sh writes them here and
+# hands them straight to `gh release create`; keeping one out of git stops a
+# stale archive being committed by accident.
+/.build/
+
+# macOS
+.DS_Store
+
+# A plugin's own build leftovers. Everything else in a plugin folder ships —
+# including `refresh.mjs`, which is a dev script but tiny and referenced by
+# the plugin README.
+*.log
+node_modules/

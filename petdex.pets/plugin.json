@@ -1,0 +1,42 @@
+{
+  "id": "petdex.pets",
+  "name": "Petdex Pets",
+  "version": "1.6.0",
+  "apiVersion": 1,
+  "minAppVersion": "0.2.37",
+  "description": "A draggable pet that floats over Bentomux and reacts to the agent in the terminal you are looking at.",
+  "author": "petdex",
+  "entry": "index.js",
+  "icon": {
+    "type": "builtin",
+    "name": "bot"
+  },
+  "permissions": [
+    "storage",
+    "app.read"
+  ],
+  "network": [
+    "https://petdex.dev",
+    "https://assets.petdex.dev"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "petdex.pets.toggle-overlay",
+        "title": "Petdex: Toggle the pet (show or hide the floating overlay)"
+      }
+    ],
+    "settings": [
+      {
+        "id": "petdex.pets.picker",
+        "title": "Petdex"
+      }
+    ],
+    "services": [
+      {
+        "id": "petdex.pets.warm",
+        "title": "Warm the pet gallery"
+      }
+    ]
+  }
+}
