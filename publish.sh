@@ -78,12 +78,19 @@ echo "==> zipping $PLUGIN_DIR"
 
 # a wrapper directory would also install, but the marketplace docs and the
 # platform spec both describe files at the root, so check rather than assume
-if ! unzip -l "$ZIP" | grep -q ' plugin\.json$'; then
+#
+# The listing is captured before grepping rather than piped into it: `grep -q`
+# exits the moment it matches, which sends SIGPIPE to unzip, and `set -o
+# pipefail` (above) then reports that 141 as a failed pipeline. It is a race —
+# it passes or fails depending on which side wins — so piping here made this
+# guard reject perfectly good archives at random.
+LISTING="$(unzip -l "$ZIP")"
+if ! grep -q ' plugin\.json$' <<<"$LISTING"; then
   echo "plugin.json is not at the archive root — check what got zipped:" >&2
-  unzip -l "$ZIP" >&2
+  echo "$LISTING" >&2
   exit 1
 fi
-echo "    $(unzip -l "$ZIP" | tail -1 | awk '{print $2" bytes, "$3" files"}'), plugin.json at root"
+echo "    $(tail -1 <<<"$LISTING" | awk '{print $2" bytes, "$3" files"}'), plugin.json at root"
 
 # 4. release --------------------------------------------------------------
 echo "==> creating release v$VERSION"
