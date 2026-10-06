@@ -169,16 +169,61 @@ export function paneState(status) {
 }
 
 /**
+ * How long a freshly recorded approval is trusted before the pane's own state
+ * has to confirm it.
+ *
+ * `agent:approval` and the runtime tick are independent: an approval can land
+ * before the next tick reports its pane as blocked, and the poller backs off to
+ * 5 s when nothing is moving. Six seconds covers that gap without letting a
+ * resolved approval sit around.
+ */
+export const APPROVAL_GRACE_MS = 6000;
+
+/**
+ * Which recorded approvals are still live, dropping the ones that are not.
+ *
+ * `agent:approvalClosed` is the only notice that clears an approval, and it is
+ * not guaranteed to arrive. Bentomux suppresses its own prompt while the
+ * requesting tab is on screen — it must not pop a pill over the dialog the user
+ * is already looking at — so the user answers Claude's native dialog directly:
+ * no decision goes through the bridge, no close notice is emitted, and the
+ * entry stayed here forever. Because a non-empty set outranks the pane's own
+ * state, the pet then waited in every state, idle and working alike.
+ *
+ * So the set is reconciled against the runtime status the plugin already has.
+ * An approval is live while its pane reports `blocked` — which is what the
+ * detector says for a dialog that is up — or for `graceMs` after it arrived, so
+ * a tick that has not caught up yet cannot clear it. Anything else is stale:
+ * the user answered natively, or the pane is gone.
+ *
+ * Mutates `pending` (requestId -> { paneId, at }) and returns the panes still
+ * waiting, ready for `petStateFor`.
+ */
+export function liveApprovalPanes(pending, statuses, now, graceMs = APPROVAL_GRACE_MS) {
+  const panes = new Set();
+  for (const [id, entry] of pending) {
+    const status = statuses?.[entry.paneId];
+    if ((status !== undefined && paneState(status) === 'blocked') || now - entry.at < graceMs) {
+      panes.add(entry.paneId);
+    } else {
+      pending.delete(id);
+    }
+  }
+  return panes;
+}
+
+/**
  * Bentomux runtime status -> pet state, for one pane.
  *
  * `statuses` is the whole map keyed by pane id and `paneId` is the pane the
  * user is looking at. Only that pane counts: a background tab churning through
  * a build should not make the pet in front of you look busy.
  *
- * `approvalPanes` is the set of panes holding an unresolved approval request.
- * Unlike run state, that is deliberately *not* scoped to the focused pane: an
- * approval raises Bentomux's own always-on-top prompt regardless of which tab
- * you are on, so the pet has to agree with it. Attention outranks work.
+ * `approvalPanes` is the set of panes holding an unresolved approval request,
+ * as reconciled by `liveApprovalPanes`. Unlike run state, that is deliberately
+ * *not* scoped to the focused pane: an approval raises Bentomux's own
+ * always-on-top prompt regardless of which tab you are on, so the pet has to
+ * agree with it. Attention outranks work.
  */
 export function petStateFor(statuses, paneId, approvalPanes) {
   if (approvalPanes?.size) return 'waiting';

@@ -197,6 +197,8 @@ const { activate } = await import(
 const sections = new Map();
 const saved = new Map();
 let runtimeStatusListener = null;
+let approvalListener = null;
+let approvalClosedListener = null;
 saved.set('pet', 'pet-3');   // so the "active:" branch of the count label is exercised
 saved.set('reversed-pets', []);
 const ctx = {
@@ -208,8 +210,14 @@ const ctx = {
       cb({ 'pane-1': { running: true, state: 'working' } });
       return () => {};
     },
-    onAgentApproval: () => () => {},
-    onAgentApprovalClosed: () => () => {},
+    onAgentApproval: cb => {
+      approvalListener = cb;
+      return () => {};
+    },
+    onAgentApprovalClosed: cb => {
+      approvalClosedListener = cb;
+      return () => {};
+    },
   },
   ui: { command() {}, service() {}, settingsSection: (id, fn) => sections.set(id, fn) },
   dispose() {},
@@ -440,6 +448,55 @@ timeouts.shift()();
 check('review cycle restores idle state', stage.style.props.get('--pdx-y'), '0px');
 Math.random = random;
 globalThis.setTimeout = nativeSetTimeout;
+
+console.log('\n14b. an approval that is never closed cannot pin the pet to waiting');
+/* The regression: while the requesting tab is on screen Bentomux suppresses its
+   own prompt, so the user answers Claude's native dialog directly — no decision
+   crosses the bridge and `agent:approvalClosed` never fires. The approval used
+   to sit in the plugin forever, and because it outranks run state the pet
+   waited whether the pane was idle or working. */
+const realNow = Date.now;
+let clock = 1_000_000;
+Date.now = () => clock;
+try {
+  /* waiting is row 6 of a 120px cell */
+  approvalListener({ requestId: 'r1', paneId: 'pane-1' });
+  check('a fresh approval waits', stage.style.props.get('--pdx-y'), '-720px');
+
+  /* the tick lands mid-grace: still waiting, nothing dropped */
+  clock += 2000;
+  runtimeStatusListener({ 'pane-1': { running: false, state: 'idle' } });
+  check('a tick inside the grace window still waits', stage.style.props.get('--pdx-y'), '-720px');
+
+  /* idle long past the grace window: stale, so the pet goes idle again */
+  clock += 10_000;
+  runtimeStatusListener({ 'pane-1': { running: false, state: 'idle' } });
+  check('an idle pane with an unclosed approval falls back to idle',
+    stage.style.props.get('--pdx-y'), '0px');
+
+  /* the same request while the pane is working: the second symptom */
+  approvalListener({ requestId: 'r2', paneId: 'pane-1' });
+  check('the new approval waits again', stage.style.props.get('--pdx-y'), '-720px');
+  clock += 10_000;
+  runtimeStatusListener({ 'pane-1': { running: true, state: 'working' } });
+  check('a working pane with an unclosed approval runs, not waits',
+    stage.style.props.get('--pdx-y'), '-840px');
+
+  /* a genuinely blocked pane keeps waiting however old the approval is */
+  approvalListener({ requestId: 'r3', paneId: 'pane-1' });
+  clock += 10 * 60_000;
+  runtimeStatusListener({ 'pane-1': { running: true, state: 'blocked' } });
+  check('a pane the detector calls blocked still waits', stage.style.props.get('--pdx-y'), '-720px');
+
+  /* and the close notice still clears it immediately */
+  clock += 10 * 60_000;
+  approvalClosedListener('r3');
+  runtimeStatusListener({ 'pane-1': { running: false, state: 'idle' } });
+  check('the close notice clears a waiting pet', stage.style.props.get('--pdx-y'), '0px');
+} finally {
+  Date.now = realNow;
+  runtimeStatusListener({ 'pane-1': { running: false, state: 'idle' } });
+}
 
 console.log('\n15. every card carries the maker and the two counts');
 search.value = '';

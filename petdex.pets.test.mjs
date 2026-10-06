@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   ANIMATION,
+  APPROVAL_GRACE_MS,
   CELL_H,
   CELL_W,
   COLUMNS,
@@ -14,6 +15,7 @@ import {
   atlasVars,
   cellSize,
   dragStateFor,
+  liveApprovalPanes,
   petStateFor,
   paneState,
   rowsForSheet,
@@ -196,6 +198,58 @@ assert.equal(
 assert.equal(petStateFor(three, 'p-1', approvals), 'waiting');
 assert.equal(petStateFor(three, null, approvals), 'waiting');
 assert.equal(petStateFor(three, 'p-2', new Set()), 'idle');
+
+/* The approval set is reconciled against the runtime status, because
+   `agent:approvalClosed` is not guaranteed to arrive. While the requesting tab
+   is on screen Bentomux suppresses its own prompt, so the user answers Claude's
+   native dialog directly: no decision crosses the bridge, no close notice is
+   emitted, and the entry used to sit here forever — pinning the pet to
+   `waiting` while the pane was idle *and* while it was working. */
+
+/* a pane the detector calls blocked is genuinely waiting, however old */
+{
+  const pending = new Map([['r1', { paneId: 'p-1', at: 0 }]]);
+  const panes = liveApprovalPanes(pending, { 'p-1': { state: 'blocked' } }, 10 * APPROVAL_GRACE_MS);
+  assert.deepEqual([...panes], ['p-1']);
+  assert.equal(petStateFor({ 'p-1': { state: 'blocked' } }, 'p-1', panes), 'waiting');
+  assert.equal(pending.size, 1);
+}
+
+/* idle or working with an old approval: stale, dropped, and the pet follows the
+   pane again — the two symptoms in the report */
+for (const state of ['idle', 'working']) {
+  const pending = new Map([['r1', { paneId: 'p-1', at: 0 }]]);
+  const statuses = { 'p-1': { state } };
+  const panes = liveApprovalPanes(pending, statuses, 10 * APPROVAL_GRACE_MS);
+  assert.equal(panes.size, 0);
+  assert.equal(pending.size, 0, `stale approval must not survive a ${state} pane`);
+  assert.equal(petStateFor(statuses, 'p-1', panes), state === 'working' ? 'running' : 'idle');
+}
+
+/* the grace window: the runtime tick is a separate 1-5 s poller, so an approval
+   that just arrived must still wait even though no tick has reported it yet */
+{
+  const pending = new Map([['r1', { paneId: 'p-1', at: 1000 }]]);
+  const statuses = { 'p-1': { state: 'idle' } };
+  assert.equal(liveApprovalPanes(pending, statuses, 1000 + APPROVAL_GRACE_MS - 1).size, 1);
+  assert.equal(liveApprovalPanes(pending, statuses, 1000 + APPROVAL_GRACE_MS).size, 0);
+  assert.equal(pending.size, 0);
+}
+
+/* a pane that vanished entirely cannot hold an approval open */
+{
+  const pending = new Map([['r1', { paneId: 'gone', at: 0 }]]);
+  assert.equal(liveApprovalPanes(pending, {}, 10 * APPROVAL_GRACE_MS).size, 0);
+  assert.equal(pending.size, 0);
+}
+
+/* a pane with no manifest rule matched reports only `running`; that is a live
+   pane, so a recent approval still waits on it */
+{
+  const pending = new Map([['r1', { paneId: 'p-1', at: 0 }]]);
+  const panes = liveApprovalPanes(pending, { 'p-1': { running: true } }, 0);
+  assert.deepEqual([...panes], ['p-1']);
+}
 
 /* the grid constants the sheet layout is built on */
 assert.equal(COLUMNS, 8);

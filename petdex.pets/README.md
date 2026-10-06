@@ -9,6 +9,16 @@ terminal you are actually looking at: a working pane makes it run, a blocked
 one makes it wait, and an unresolved approval makes it wait in any pane,
 because Bentomux's own prompt does too.
 
+An approval is not trusted on its own notice alone. `agent:approvalClosed` is
+the only event that clears one, and Bentomux deliberately does not raise its
+prompt while the requesting tab is on screen — so when you answer Claude's
+native dialog directly, no decision crosses the bridge and no close notice
+arrives. Each approval is therefore reconciled against the runtime status on
+every tick: it stays live while its pane reports `blocked`, or for six seconds
+after it arrived so the poller's 1–5 s cadence cannot clear it early, and is
+dropped otherwise. Without that, one natively-answered prompt pinned the pet to
+`waiting` for the rest of the session — in every pane, idle or working.
+
 | Where | What |
 |---|---|
 | Everywhere | The pet, fixed to the window, draggable, corner remembered. No text on hover or drag — the pet is the whole thing |
@@ -46,7 +56,11 @@ paging, debouncing, a roving tab stop, an image fallback, section re-entry, and
 now the search, sort and facet paths. It drives the actual plugin entry through
 a ~150-line fake DOM, including the throw-away-and-rebuild the settings host
 does on every switch. It is not a general-purpose shim; it implements the
-handful of selectors and layout facts this plugin uses.
+handful of selectors and layout facts this plugin uses. It also drives the
+overlay's approval lifecycle — a fresh approval waits, one the pane never
+confirms ages out, a pane the detector calls `blocked` keeps waiting, and a
+close notice still clears it — by faking `Date.now` and the two approval
+listeners.
 
 Its fake `fetch` answers both requests the plugin makes — the remote manifest
 and the bundled `pets.json` — and `pets.json` is served in the real positional

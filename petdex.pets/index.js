@@ -15,6 +15,7 @@ import {
   atlasVars,
   cellSize,
   dragStateFor,
+  liveApprovalPanes,
   petStateFor,
   stripVars,
 } from './sprite.js';
@@ -329,13 +330,19 @@ function mountOverlay() {
   let statuses = {};
   let paneId = null;
   /* pane ids with an unresolved approval; a pending permission is global
-     because Bentomux's own prompt is global. Keyed by request id because that
-     is all the close notice carries. */
+     because Bentomux's own prompt is global. Keyed by request id — that is all
+     the close notice carries — holding { paneId, at } so a stale entry can be
+     aged out when the close notice never arrives. */
   const pending = new Map();
   let gone = false;
 
   const onPet = () => void load();
   subscribers.add(onPet);
+
+  /* the panes still waiting on an approval, with the stale ones dropped as a
+     side effect — every state read goes through here, so a close notice that
+     never came cannot pin the pet to `waiting` */
+  const approvalPanes = () => liveApprovalPanes(pending, statuses, Date.now());
 
   const offTab = ctx.events.on('tab:activated', payload => {
     paneId = payload?.paneId ?? null;
@@ -347,7 +354,7 @@ function mountOverlay() {
   });
   const offApproval = ctx.app.onAgentApproval(req => {
     /* the close notice names the request, not the pane, so keep the mapping */
-    if (req?.paneId) pending.set(req.requestId, req.paneId);
+    if (req?.paneId) pending.set(req.requestId, { paneId: req.paneId, at: Date.now() });
     apply();
   });
   const offApprovalClosed = ctx.app.onAgentApprovalClosed(requestId => {
@@ -396,7 +403,7 @@ function mountOverlay() {
 
   function apply() {
     if (gone || !sheet?.width) return;
-    const baseState = petStateFor(statuses, paneId, new Set(pending.values()));
+    const baseState = petStateFor(statuses, paneId, approvalPanes());
     if (baseState !== 'idle') clearAmbient();
     const state = drag?.state || (baseState === 'idle' && ambientState) || baseState;
     const scale = PET_HEIGHT / cellSize(sheet.width, sheet.height).h;
@@ -417,7 +424,7 @@ function mountOverlay() {
 
   function playAmbient() {
     if (gone || drag || !sheet?.width) return;
-    if (petStateFor(statuses, paneId, new Set(pending.values())) !== 'idle') return;
+    if (petStateFor(statuses, paneId, approvalPanes()) !== 'idle') return;
     clearAmbient();
     const state = Math.random() < 0.5 ? 'waving' : 'review';
     ambientState = state;
