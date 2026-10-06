@@ -90,7 +90,9 @@ if ! grep -q ' plugin\.json$' <<<"$LISTING"; then
   echo "$LISTING" >&2
   exit 1
 fi
-echo "    $(tail -1 <<<"$LISTING" | awk '{print $2" bytes, "$3" files"}'), plugin.json at root"
+# the size that matters is the bytes actually uploaded, not the uncompressed
+# total in unzip's summary line (which is ~3x larger and reads as the download)
+echo "    $(wc -c <"$ZIP" | tr -d ' ') bytes, $(tail -1 <<<"$LISTING" | awk '{print $2}') files, plugin.json at root"
 
 # 4. release --------------------------------------------------------------
 echo "==> creating release v$VERSION"
