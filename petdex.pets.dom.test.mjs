@@ -380,7 +380,9 @@ check('the check is a tick, not a bullet', first.querySelector('.pdx__check').te
    and a second "selected" signal would be read out twice */
 check('the check is hidden from assistive tech', first.querySelector('.pdx__check').getAttribute('aria-hidden'), 'true');
 first.fire('click');
-check('clicking marks the card', first.getAttribute('aria-pressed'), 'true');
+check('clicking only previews, does not apply yet', first.getAttribute('aria-pressed'), 'false');
+root.querySelector('.pdx__apply').fire('click');
+check('Apply marks the card', first.getAttribute('aria-pressed'), 'true');
 check('exactly one card is selected', [...cards()].filter(c => c.getAttribute('aria-pressed') === 'true').length, 1);
 check('the previously active card lost the mark', cards()[1].getAttribute('aria-pressed'), 'false');
 

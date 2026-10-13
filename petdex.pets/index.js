@@ -43,6 +43,17 @@ const SORTS = {
   alpha: { label: 'A to Z', cmp: (a, b) => a.name.localeCompare(b.name) },
 };
 const KINDS = ['creature', 'character', 'object'];
+/* the animations this plugin actually plays and what sets each one off.
+   jumping and failed exist in the sheet format, but nothing here plays them */
+const PLAYED = {
+  idle: 'Idle, resting',
+  running: 'Agent working',
+  waiting: 'Agent waiting or approval',
+  waving: 'Ambient wave',
+  review: 'Ambient review',
+  'running-right': 'Dragged right',
+  'running-left': 'Dragged left',
+};
 
 /* the catalogue is ~4.8k rows, well past the 1 MB storage cap, so it stays in
    memory for the session and only the chosen slug is persisted */
@@ -239,6 +250,21 @@ const CHROME = `
 .pdx__by { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   color:var(--ink-3); font-size:10px; }
 .pdx__stats { display:flex; gap:6px; color:var(--ink-3); font:10px/1 var(--sans); }
+.pdx__preview:empty { display:none; }
+.pdx__preview { display:flex; flex-direction:column; gap:8px; padding:10px;
+  border-radius:8px; border:1px solid var(--line-2); background:var(--tint); }
+.pdx__preview-head { display:flex; align-items:center; gap:8px; }
+.pdx__preview-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; color:var(--ink); font:13px var(--sans); }
+.pdx__anims { display:grid; gap:8px; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr));
+  color:var(--ink-3); font:12px var(--sans); }
+.pdx__anims .pdx__loading { grid-column:1 / -1; padding:8px 0; }
+.pdx__anim { display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center; }
+.pdx__anim-sprite { flex:0 0 auto; }
+.pdx__apply, .pdx__cancel { padding:4px 12px; border-radius:6px; font:12px var(--sans);
+  cursor:pointer; border:1px solid var(--line-2); background:var(--bg); color:var(--ink-2); }
+.pdx__apply { border-color:var(--accent); color:var(--ink); }
+.pdx__apply:focus-visible, .pdx__cancel:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
 /* the floating pet. Fixed to the window, not to a page, so it survives tab
    switches, workspace switches and the welcome page alike. */
@@ -541,6 +567,18 @@ function savePos(x, y) {
    image probes writing into a detached tree. */
 let retirePicker = null;
 
+function loadingRow(msg, spinning = true) {
+  const row = document.createElement('div');
+  row.className = 'pdx__loading';
+  if (spinning) {
+    const ring = document.createElement('span');
+    ring.className = 'pdx-spinner';
+    row.append(ring);
+  }
+  row.append(document.createTextNode(msg));
+  return row;
+}
+
 function picker() {
   retirePicker?.();
   retirePicker = null;
@@ -569,6 +607,8 @@ function picker() {
   const chips = document.createElement('div');
   chips.className = 'pdx__chips';
   const grid = document.createElement('div');
+  const preview = document.createElement('div');
+  preview.className = 'pdx__preview';
   const directionLabel = document.createElement('label');
   directionLabel.className = 'pdx__direction';
   const directionToggle = document.createElement('input');
@@ -580,7 +620,7 @@ function picker() {
   directionLabel.append(directionToggle, directionText);
   grid.className = 'pdx__grid';
   bar.append(search, sort, count);
-  root.append(bar, chips, directionLabel, grid);
+  root.append(bar, chips, directionLabel, preview, grid);
 
   /* one chip per kind, plus the counts of what the current search leaves —
      the same facet counts petdex.dev shows, so a filter that would return
@@ -638,15 +678,7 @@ function picker() {
      tab opens, so this only shows on a cold start or after a failed warm */
   const note = (msg, spinning) => {
     grid.textContent = '';
-    const row = document.createElement('div');
-    row.className = 'pdx__loading';
-    if (spinning) {
-      const ring = document.createElement('span');
-      ring.className = 'pdx-spinner';
-      row.append(ring);
-    }
-    row.append(document.createTextNode(msg));
-    grid.append(row);
+    grid.append(loadingRow(msg, spinning));
   };
   note('Loading 4,800+ pets from petdex.dev…', true);
 
@@ -659,6 +691,68 @@ function picker() {
     if (cursor) cursor.tabIndex = -1;
     cursor = card;
     card.tabIndex = 0;
+  };
+
+  /* a pet is previewed before it is applied: its animations play here, and
+     only Apply makes it the active pet */
+  let previewing = null;
+  const closePreview = () => {
+    previewing = null;
+    preview.textContent = '';
+  };
+  const openPreview = (pet, card) => {
+    previewing = pet.slug;
+    preview.textContent = '';
+    const head = document.createElement('div');
+    head.className = 'pdx__preview-head';
+    const title = document.createElement('div');
+    title.className = 'pdx__preview-title';
+    title.textContent = `${pet.name} — by ${pet.by}`;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'pdx__cancel';
+    close.textContent = 'Close';
+    close.addEventListener('click', closePreview);
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    apply.className = 'pdx__apply';
+    apply.textContent = 'Apply';
+    apply.addEventListener('click', () => {
+      closePreview();
+      void choosePet(pet.slug);
+      directionToggle.checked = reversedPets.has(pet.slug);
+      directionToggle.setAttribute('aria-label', `Reverse drag direction for ${pet.name}`);
+      mark(card, pet);
+    });
+    head.append(title, close, apply);
+    const strip = document.createElement('div');
+    strip.className = 'pdx__anims';
+    strip.append(loadingRow('Loading animations...'));
+    preview.append(head, strip);
+    preview.scrollIntoView({ block: 'start' });
+    measure(
+      pet.sprite,
+      (w, h) => {
+        if (gone || previewing !== pet.slug) return;
+        strip.textContent = '';
+        const scale = THUMB_HEIGHT / cellSize(w, h).h;
+        for (const [state, label] of Object.entries(PLAYED)) {
+          const item = document.createElement('div');
+          item.className = 'pdx__anim';
+          const sprite = document.createElement('div');
+          sprite.className = 'pdx__anim-sprite pdx-sprite';
+          paint(sprite, atlasVars(pet.sprite, w, h, state, scale));
+          const text = document.createElement('div');
+          text.textContent = label;
+          item.append(sprite, text);
+          strip.append(item);
+        }
+      },
+      () => {
+        if (gone || previewing !== pet.slug) return;
+        strip.textContent = `Could not load the animations for ${pet.name}.`;
+      },
+    );
   };
 
   const cardFor = (pet, first) => {
@@ -724,15 +818,7 @@ function picker() {
       stats.append(installs, loves);
     }
     card.append(check, thumb, name, by, stats);
-    card.addEventListener('click', () => {
-      void choosePet(pet.slug);
-      directionToggle.checked = reversedPets.has(pet.slug);
-      directionToggle.setAttribute(
-        'aria-label',
-        `Reverse drag direction for ${pet.name}`,
-      );
-      mark(card, pet);
-    });
+    card.addEventListener('click', () => openPreview(pet, card));
     card.addEventListener('focus', () => {
       /* the tab stop has to travel with the focus. Without re-arming it here
          the grid ends up with zero tabbable cards the moment an arrow key is
@@ -764,6 +850,7 @@ function picker() {
 
   const draw = () => {
     drawId += 1;
+    closePreview();
     grid.textContent = '';
     moreBtn = null;
     cursor = null;
