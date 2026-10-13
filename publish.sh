@@ -57,6 +57,31 @@ fi
 echo "==> validating $PLUGIN_DIR"
 "$VALIDATOR" --plugin-validate "$PLUGIN_DIR" || exit $?
 
+# 1b. cross-module imports -------------------------------------------------
+# A named import whose export is missing (index.js ahead of sprite.js) passes
+# validation, then fails at load with "Importing binding name ... not found".
+# Check every `import { a, b } from './x.js'` against `export` in x.js.
+echo "==> checking imports in $PLUGIN_DIR"
+node -e '
+  const fs = require("fs"), path = require("path");
+  const dir = process.argv[1];
+  let bad = 0;
+  for (const f of fs.readdirSync(dir).filter(n => n.endsWith(".js"))) {
+    const src = fs.readFileSync(path.join(dir, f), "utf8");
+    for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*\x27\.\/([^\x27]+)\x27/g)) {
+      const target = path.join(dir, m[2]);
+      if (!fs.existsSync(target)) { console.error(`${f}: missing module ${m[2]}`); bad++; continue; }
+      const exp = fs.readFileSync(target, "utf8");
+      for (const raw of m[1].split(",").map(s => s.trim()).filter(Boolean)) {
+        const name = raw.split(/\s+as\s+/)[0];
+        const re = new RegExp(`export\\s+(async\\s+)?(function\\*?|const|let|var|class)\\s+${name}\\b|export\\s*\\{[^}]*\\b${name}\\b`);
+        if (!re.test(exp)) { console.error(`${f}: \x27${name}\x27 not exported by ${m[2]}`); bad++; }
+      }
+    }
+  }
+  process.exit(bad ? 1 : 0);
+' "$PLUGIN_DIR" || { echo "import check failed: mixed or stale files in $PLUGIN_DIR" >&2; exit 1; }
+
 # 2. version guard --------------------------------------------------------
 ACTUAL="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['version'])" "$PLUGIN_DIR/plugin.json")"
 if [ "$ACTUAL" != "$VERSION" ]; then
