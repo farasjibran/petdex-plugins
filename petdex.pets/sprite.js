@@ -16,25 +16,12 @@ export const COLUMNS = 8;
 export const CELL_W = 192;
 export const CELL_H = 208;
 
-/** One animation name for the whole plugin. */
-export const ANIMATION = 'pdx-pet';
-
 /**
- * The single @keyframes rule every sprite in the plugin shares.
- *
- * Geometry lives in custom properties on each element rather than in baked
- * offsets, so one rule covers every sheet, every state and every size — a
- * gallery of 48 cards costs one rule, not 48. This is the same shape as
- * petdex's own `--sprite-row` / `--sprite-end-x`.
- *
- * `--pdx-end` must be `frames * --pdx-cell-w`, not `(frames - 1) * cell`:
- * steps(N) samples the range at 0, 1/N, ..., (N-1)/N, so ending on the last
- * frame lands every sample between cells and the sprite smears sideways
- * instead of stepping.
+ * Playback runs through the Web Animations API (`element.animate`) with plain
+ * numbers, not a CSS @keyframes rule that reads `var()` values. Some WebKit
+ * builds (macOS Monterey) never start a `var()`-driven animation whose timing
+ * is set after first style, so the sprite sits on frame 0 until a restyle.
  */
-export const KEYFRAMES = `@keyframes ${ANIMATION}{` +
-  'from{background-position:0 var(--pdx-y)}' +
-  'to{background-position:var(--pdx-end) var(--pdx-y)}}';
 
 export const STATES = {
   idle: { row: 0, frames: 6, ms: 1100 },
@@ -130,6 +117,18 @@ export function atlasVars(spriteUrl, sheetWidth, sheetHeight, state, scale = 1) 
     y: -spec.row * cell.h,
     end: -spec.frames * cell.w,
   };
+}
+
+/**
+ * Keyframes for one row of a sheet, as plain numbers for `element.animate`.
+ * `steps(N)` in the old rule ended on the last frame's start, so the end is
+ * `frames` cells along, not `frames - 1`.
+ */
+export function frameKeyframes(v) {
+  return [
+    { backgroundPosition: `0px ${v.y}px` },
+    { backgroundPosition: `${v.end}px ${v.y}px` },
+  ];
 }
 
 /** The same, for a single-row preview strip. */

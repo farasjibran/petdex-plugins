@@ -8,10 +8,9 @@
  * bentomux-plugin-sdk.d.ts for the context API. */
 
 import {
-  ANIMATION,
   CELL_H,
-  KEYFRAMES,
   STATES,
+  frameKeyframes,
   atlasVars,
   cellSize,
   dragStateFor,
@@ -168,7 +167,6 @@ async function choosePet(slug) {
 }
 
 const CHROME = `
-${KEYFRAMES}
 @keyframes pdx-spin { to { transform:rotate(1turn) } }
 
 /* One busy ring, three sizes of job. A placeholder that occupies the space it
@@ -181,19 +179,17 @@ ${KEYFRAMES}
   color:var(--ink-3); font:13px var(--sans); }
 
 /* every sprite in the plugin: the floating pet and each picker thumbnail.
-   One @keyframes rule, geometry per element, so a grid of 48 animated cards
-   costs the same as one pet. Every property paint() sets has to be read here
-   or the sheet renders at natural size inside a scaled-down box. */
-.pdx-sprite { --pdx-w:auto; --pdx-h:auto; --pdx-end:0px; --pdx-y:0px; --pdx-ms:1100ms; --pdx-frames:6;
+   Frames are played by paint() through element.animate(), not a CSS
+   @keyframes rule: WebKit on macOS Monterey never started a var()-driven
+   animation, so the sprite sat on frame 0. Geometry is set per element. */
+.pdx-sprite { --pdx-url:none; --pdx-w:auto; --pdx-h:auto; --pdx-y:0px;
   background-image:var(--pdx-url); background-size:var(--pdx-w) var(--pdx-h);
   background-repeat:no-repeat; background-position:0 var(--pdx-y);
-  image-rendering:pixelated;
-  animation:pdx-pet var(--pdx-ms) steps(var(--pdx-frames)) infinite; }
+  image-rendering:pixelated; }
 
 /* An always-running pet is exactly what this setting is for: hold the first
    frame instead of removing the sprite, so the pet is still there to drag. */
 @media (prefers-reduced-motion: reduce) {
-  .pdx-sprite { animation:none; }
   .pdx-spinner { animation-duration:2.4s; }
 }
 
@@ -285,17 +281,33 @@ function busy(el, on) {
   }
 }
 
-/** Point a `.pdx-sprite` element at one row of a sheet, or at a preview strip. */
+const reduceMotion = () => !!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Point a `.pdx-sprite` element at one row of a sheet, or at a preview strip,
+ * and play it. Restarts the animation only when the row or the timing changes:
+ * apply() runs on every poll tick and must not reset the frame each time.
+ */
 function paint(el, v) {
   el.style.setProperty('--pdx-url', `url("${v.url}")`);
   el.style.setProperty('--pdx-w', `${v.sheetWidth}px`);
   el.style.setProperty('--pdx-h', `${v.sheetHeight}px`);
   el.style.setProperty('--pdx-y', `${v.y}px`);
-  el.style.setProperty('--pdx-end', `${v.end}px`);
-  el.style.setProperty('--pdx-ms', `${v.ms}ms`);
-  el.style.setProperty('--pdx-frames', String(v.frames));
   el.style.width = `${v.cell.w}px`;
   el.style.height = `${v.cell.h}px`;
+
+  const motion = reduceMotion();
+  const key = [v.url, v.y, v.end, v.ms, v.frames, motion].join('|');
+  if (el.dataset.anim === key) return;
+  el.dataset.anim = key;
+  el.getAnimations?.().forEach(a => a.cancel());
+  /* reduce motion holds frame 0 (background-position in CSS) */
+  if (motion) return;
+  el.animate?.(frameKeyframes(v), {
+    duration: v.ms,
+    iterations: Infinity,
+    easing: `steps(${v.frames})`,
+  });
 }
 
 /**

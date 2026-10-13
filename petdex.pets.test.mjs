@@ -5,13 +5,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  ANIMATION,
   APPROVAL_GRACE_MS,
   CELL_H,
   CELL_W,
   COLUMNS,
-  KEYFRAMES,
   STATES,
+  frameKeyframes,
   atlasVars,
   cellSize,
   dragStateFor,
@@ -55,11 +54,13 @@ assert.deepEqual(cellSize(3072, 3744), { w: 384, h: 416 });
    CSS identifier, so the browser dropped the @keyframes rule entirely and the
    first frame just stayed put. One shared name now carries every sheet, so
    there is nothing left to get wrong per pet. */
-const LEGAL_IDENT = /^[A-Za-z][A-Za-z0-9_-]*$/;
-assert.ok(LEGAL_IDENT.test(ANIMATION), `\`${ANIMATION}\` is not a legal CSS identifier`);
-assert.match(KEYFRAMES, new RegExp(`@keyframes ${ANIMATION}\\{`));
-/* geometry comes from custom properties, so the rule is sheet-agnostic */
-assert.match(KEYFRAMES, /background-position:var\(--pdx-end\) var\(--pdx-y\)/);
+/* playback is element.animate() with literal numbers: no @keyframes, no var()
+   inside keyframes, so there is no CSS identifier to get wrong and nothing a
+   WebKit build can refuse to start. */
+assert.deepEqual(frameKeyframes({ y: -360, end: -1536 }), [
+  { backgroundPosition: '0px -360px' },
+  { backgroundPosition: '-1536px -360px' },
+]);
 
 /* every step a state samples must land exactly on a cell boundary, or the
    sprite smears sideways instead of stepping */
@@ -266,13 +267,16 @@ assert.equal(CELL_H, 208);
 const here = fileURLToPath(new URL('.', import.meta.url));
 const index = readFileSync(`${here}petdex.pets/index.js`, 'utf8');
 const chrome = index.slice(index.indexOf('const CHROME'), index.indexOf('/** One <style>'));
-const stylesheet = chrome + KEYFRAMES;
+const stylesheet = chrome;
 
 const written = [...new Set([...index.matchAll(/setProperty\('(--pdx-[\w-]+)'/g)].map(m => m[1]))];
-assert.deepEqual(written.sort(), ['--pdx-end', '--pdx-frames', '--pdx-h', '--pdx-ms', '--pdx-url', '--pdx-w', '--pdx-y']);
+assert.deepEqual(written.sort(), ['--pdx-h', '--pdx-url', '--pdx-w', '--pdx-y']);
 for (const name of written) {
   assert.ok(stylesheet.includes(`var(${name})`), `${name} is set by paint() but no rule reads it`);
 }
+/* paint() owns playback; the sprite rule must not carry its own animation */
+assert.doesNotMatch(chrome, /animation:pdx-pet/);
+assert.match(index, /el\.animate\?\.\(frameKeyframes\(v\)/);
 /* and the sheet really is scaled, not left at natural size */
 assert.match(chrome, /background-size:var\(--pdx-w\) var\(--pdx-h\)/);
 assert.match(chrome, /--pdx-w:auto/);
